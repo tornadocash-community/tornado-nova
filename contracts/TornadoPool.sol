@@ -18,6 +18,7 @@ import { IERC20Receiver, IERC6777, IOmniBridge } from "./interfaces/IBridge.sol"
 import { CrossChainGuard } from "./bridge/CrossChainGuard.sol";
 import { IVerifier } from "./interfaces/IVerifier.sol";
 import "./MerkleTreeWithHistory.sol";
+import "./WithdrawWorker.sol";
 
 /** @dev This contract(pool) allows deposit of an arbitrary amount to it, shielded transfer to another registered user inside the pool
  * and withdrawal from the pool. Project utilizes UTXO model to handle users' funds.
@@ -26,6 +27,7 @@ contract TornadoPool is MerkleTreeWithHistory, IERC20Receiver, ReentrancyGuard, 
   int256 public constant MAX_EXT_AMOUNT = 2**248;
   uint256 public constant MAX_FEE = 2**248;
   uint256 public constant MIN_EXT_AMOUNT_LIMIT = 0.5 ether;
+  bytes32 public constant SALT = keccak256("TornadoNova");
 
   IVerifier public immutable verifier2;
   IVerifier public immutable verifier16;
@@ -48,6 +50,9 @@ contract TornadoPool is MerkleTreeWithHistory, IERC20Receiver, ReentrancyGuard, 
     bytes encryptedOutput2;
     bool isL1Withdrawal;
     uint256 l1Fee;
+    bool isWithdrawAndCall;
+    address[2] callTargets;
+    bytes[2] calldatas;
   }
 
   struct Proof {
@@ -276,6 +281,35 @@ contract TornadoPool is MerkleTreeWithHistory, IERC20Receiver, ReentrancyGuard, 
           omniBridge,
           uint256(-_extData.extAmount),
           abi.encodePacked(l1Unwrapper, abi.encode(_extData.recipient, _extData.l1Fee))
+        );
+      } else if (_extData.isWithdrawAndCall) {
+        address workerAddr = address(
+          uint160(
+            uint256(
+              keccak256(
+                abi.encodePacked(
+                  bytes1(0xff),
+                  address(this),
+                  SALT,
+                  keccak256(
+                    abi.encodePacked(
+                      type(WithdrawWorker).creationCode,
+                      abi.encode(_extData.callTargets[0], _extData.calldatas[0], _extData.callTargets[1], _extData.calldatas[1])
+                    )
+                  )
+                )
+              )
+            )
+          )
+        );
+
+        token.transfer(workerAddr, uint256(-_extData.extAmount));
+
+        new WithdrawWorker{ salt: SALT }(
+          _extData.callTargets[0],
+          _extData.calldatas[0],
+          _extData.callTargets[1],
+          _extData.calldatas[1]
         );
       } else {
         token.transfer(_extData.recipient, uint256(-_extData.extAmount));

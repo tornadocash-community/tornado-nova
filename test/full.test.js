@@ -3,6 +3,7 @@ const { ethers, waffle } = hre
 const { loadFixture } = waffle
 const { expect } = require('chai')
 const { utils } = ethers
+const { BigNumber } = require('@ethersproject/bignumber')
 
 const Utxo = require('../src/utxo')
 const { transaction, registerAndTransact, prepareTransaction, buildMerkleTree } = require('../src/index')
@@ -361,6 +362,71 @@ describe('TornadoPool', function () {
     const senderBalanceAfter = await ethers.provider.getBalance(sender.address)
     expect(senderBalanceAfter).to.be.equal(senderBalanceBefore.sub(txFee).add(l1Fee))
     expect(await ethers.provider.getBalance(recipient)).to.be.equal(aliceWithdrawAmount)
+  })
+
+  it('should withdraw with call', async function () {
+    const { tornadoPool, token, omniBridge } = await loadFixture(fixture)
+    const aliceKeypair = new Keypair() // contains private and public keys
+
+    // regular L1 deposit -------------------------------------------
+    const aliceDepositAmount = utils.parseEther('0.07')
+    const aliceDepositUtxo = new Utxo({ amount: aliceDepositAmount, keypair: aliceKeypair })
+    const { args, extData } = await prepareTransaction({
+      tornadoPool,
+      outputs: [aliceDepositUtxo],
+    })
+
+    let onTokenBridgedData = encodeDataForBridge({
+      proof: args,
+      extData,
+    })
+
+    let onTokenBridgedTx = await tornadoPool.populateTransaction.onTokenBridged(
+      token.address,
+      aliceDepositUtxo.amount,
+      onTokenBridgedData,
+    )
+    // emulating bridge. first it sends tokens to omnibridge mock then it sends to the pool
+    await token.transfer(omniBridge.address, aliceDepositAmount)
+    let transferTx = await token.populateTransaction.transfer(tornadoPool.address, aliceDepositAmount)
+
+    await omniBridge.execute([
+      { who: token.address, callData: transferTx.data }, // send tokens to pool
+      { who: tornadoPool.address, callData: onTokenBridgedTx.data }, // call onTokenBridgedTx
+    ])
+
+    // withdrawal with call -----------------------------------------
+    // withdraws a part of his funds from the shielded pool
+    const aliceWithdrawAmount = utils.parseEther('0.06')
+    const recipient = (await ethers.getSigners())[1]
+    const aliceChangeUtxo = new Utxo({
+      amount: aliceDepositAmount.sub(aliceWithdrawAmount),
+      keypair: aliceKeypair,
+    })
+    transferTx = await token.populateTransaction.transfer(recipient.address, aliceWithdrawAmount)
+    let approveTx = await token.populateTransaction.approve(recipient.address, aliceWithdrawAmount)
+
+    await expect(() =>
+      transaction({
+        tornadoPool,
+        inputs: [aliceDepositUtxo],
+        outputs: [aliceChangeUtxo],
+        recipient: recipient.address,
+        isWithdrawAndCall: true,
+        callTargets: [token.address, token.address],
+        calldatas: [transferTx.data, approveTx.data],
+      }),
+    ).to.changeTokenBalances(
+      token,
+      [tornadoPool, recipient],
+      [BigNumber.from(0).sub(aliceWithdrawAmount), aliceWithdrawAmount],
+    )
+
+    const filter = token.filters.Approval()
+    const fromBlock = await ethers.provider.getBlock()
+    const events = await token.queryFilter(filter, fromBlock.number)
+    expect(events[0].args.spender).to.be.equal(recipient.address)
+    expect(events[0].args.value).to.be.equal(aliceWithdrawAmount)
   })
 
   it('should set L1FeeReceiver on L1Unwrapper contract', async function () {
