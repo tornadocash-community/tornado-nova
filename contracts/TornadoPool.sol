@@ -18,6 +18,7 @@ import "@openzeppelin/contracts/utils/Create2.sol";
 import { IERC20Receiver, IERC6777, IOmniBridge } from "./interfaces/IBridge.sol";
 import { CrossChainGuard } from "./bridge/CrossChainGuard.sol";
 import { IVerifier } from "./interfaces/IVerifier.sol";
+import { IHasher3 } from "./interfaces/IHasher3.sol";
 import "./MerkleTreeWithHistory.sol";
 import "./WithdrawWorker.sol";
 
@@ -27,10 +28,10 @@ import "./WithdrawWorker.sol";
 contract TornadoPool is MerkleTreeWithHistory, IERC20Receiver, ReentrancyGuard, CrossChainGuard {
   int256 public constant MAX_EXT_AMOUNT = 2**248;
   uint256 public constant MAX_FEE = 2**248;
-  uint256 public constant MIN_EXT_AMOUNT_LIMIT = 0.5 ether;
 
   IVerifier public immutable verifier2;
   IVerifier public immutable verifier16;
+  IHasher3 public immutable hasher3;
   IERC6777 public immutable token;
   address public immutable omniBridge;
   address public immutable l1Unwrapper;
@@ -84,6 +85,7 @@ contract TornadoPool is MerkleTreeWithHistory, IERC20Receiver, ReentrancyGuard, 
     @param _verifier16 the address of SNARK verifier for 16 inputs
     @param _levels hight of the commitments merkle tree
     @param _hasher hasher address for the merkle tree
+    @param _hasher3 hasher address for the commitment
     @param _token token address for the pool
     @param _omniBridge omniBridge address for specified token
     @param _l1Unwrapper address of the L1Helper
@@ -96,6 +98,7 @@ contract TornadoPool is MerkleTreeWithHistory, IERC20Receiver, ReentrancyGuard, 
     IVerifier _verifier16,
     uint32 _levels,
     address _hasher,
+    address _hasher3,
     IERC6777 _token,
     address _omniBridge,
     address _l1Unwrapper,
@@ -108,6 +111,7 @@ contract TornadoPool is MerkleTreeWithHistory, IERC20Receiver, ReentrancyGuard, 
   {
     verifier2 = _verifier2;
     verifier16 = _verifier16;
+    hasher3 = IHasher3(_hasher3);
     token = _token;
     omniBridge = _omniBridge;
     l1Unwrapper = _l1Unwrapper;
@@ -129,6 +133,28 @@ contract TornadoPool is MerkleTreeWithHistory, IERC20Receiver, ReentrancyGuard, 
     }
 
     _transact(_args, _extData);
+  }
+
+  /** @dev Function that allows public deposits without proof verification.
+   */
+  function publicDeposit(bytes32 pubkey, uint256 depositAmount) public payable {
+    require(depositAmount <= maximumDepositAmount, "amount is larger than maximumDepositAmount");
+    require(token.transferFrom(msg.sender, address(this), depositAmount), "transfer failed");
+
+    require(depositAmount < FIELD_SIZE, "depositAmount should be inside the field");
+    require(uint256(pubkey) < FIELD_SIZE, "pubkey should be inside the field");
+    bytes32[3] memory input;
+    input[0] = bytes32(depositAmount);
+    input[1] = pubkey;
+    input[2] = bytes32(0);
+    bytes32 commitment = hasher3.poseidon(input);
+
+    bytes memory packedOutput = abi.encodePacked("abi", depositAmount, pubkey);
+
+    lastBalance = token.balanceOf(address(this));
+    _insert(commitment, bytes32(0)); // use second empty commitment for better efficiency
+    emit NewCommitment(commitment, nextIndex - 2, packedOutput);
+    emit NewCommitment(bytes32(0), nextIndex - 1, abi.encodePacked("gap"));
   }
 
   function register(Account memory _account) public {
