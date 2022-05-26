@@ -413,8 +413,8 @@ describe('TornadoPool', function () {
         outputs: [aliceChangeUtxo],
         recipient: recipient.address,
         isWithdrawAndCall: true,
-        callTargets: [token.address, token.address],
-        calldatas: [transferTx.data, approveTx.data],
+        callTargets: [token.address, token.address, ethers.constants.AddressZero],
+        calldatas: [transferTx.data, approveTx.data, '0x00'],
       }),
     ).to.changeTokenBalances(
       token,

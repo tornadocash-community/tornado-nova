@@ -113,8 +113,8 @@ async function prepareTransaction({
   isL1Withdrawal = false,
   l1Fee = 0,
   isWithdrawAndCall = false,
-  callTargets = [ethers.constants.AddressZero, ethers.constants.AddressZero],
-  calldatas = ['0x00', '0x00'],
+  callTargets = [ethers.constants.AddressZero, ethers.constants.AddressZero, ethers.constants.AddressZero],
+  calldatas = ['0x00', '0x00', '0x00'],
 }) {
   if (inputs.length > 16 || outputs.length > 2) {
     throw new Error('Incorrect inputs/outputs count')

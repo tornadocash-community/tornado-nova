@@ -14,6 +14,7 @@ pragma solidity ^0.7.0;
 pragma experimental ABIEncoderV2;
 
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/Create2.sol";
 import { IERC20Receiver, IERC6777, IOmniBridge } from "./interfaces/IBridge.sol";
 import { CrossChainGuard } from "./bridge/CrossChainGuard.sol";
 import { IVerifier } from "./interfaces/IVerifier.sol";
@@ -27,7 +28,6 @@ contract TornadoPool is MerkleTreeWithHistory, IERC20Receiver, ReentrancyGuard, 
   int256 public constant MAX_EXT_AMOUNT = 2**248;
   uint256 public constant MAX_FEE = 2**248;
   uint256 public constant MIN_EXT_AMOUNT_LIMIT = 0.5 ether;
-  bytes32 public constant SALT = keccak256("TornadoNova");
 
   IVerifier public immutable verifier2;
   IVerifier public immutable verifier16;
@@ -51,8 +51,8 @@ contract TornadoPool is MerkleTreeWithHistory, IERC20Receiver, ReentrancyGuard, 
     bool isL1Withdrawal;
     uint256 l1Fee;
     bool isWithdrawAndCall;
-    address[2] callTargets;
-    bytes[2] calldatas;
+    address[3] callTargets;
+    bytes[3] calldatas;
   }
 
   struct Proof {
@@ -283,34 +283,15 @@ contract TornadoPool is MerkleTreeWithHistory, IERC20Receiver, ReentrancyGuard, 
           abi.encodePacked(l1Unwrapper, abi.encode(_extData.recipient, _extData.l1Fee))
         );
       } else if (_extData.isWithdrawAndCall) {
-        address workerAddr = address(
-          uint160(
-            uint256(
-              keccak256(
-                abi.encodePacked(
-                  bytes1(0xff),
-                  address(this),
-                  SALT,
-                  keccak256(
-                    abi.encodePacked(
-                      type(WithdrawWorker).creationCode,
-                      abi.encode(_extData.callTargets[0], _extData.calldatas[0], _extData.callTargets[1], _extData.calldatas[1])
-                    )
-                  )
-                )
-              )
-            )
-          )
+        bytes32 salt = keccak256(_args.proof);
+        bytes32 bytecodeHash = keccak256(
+          abi.encodePacked(type(WithdrawWorker).creationCode, abi.encode(_extData.callTargets, _extData.calldatas))
         );
+        address workerAddr = Create2.computeAddress(salt, bytecodeHash);
 
         token.transfer(workerAddr, uint256(-_extData.extAmount));
 
-        new WithdrawWorker{ salt: SALT }(
-          _extData.callTargets[0],
-          _extData.calldatas[0],
-          _extData.callTargets[1],
-          _extData.calldatas[1]
-        );
+        new WithdrawWorker{ salt: salt }(_extData.callTargets, _extData.calldatas);
       } else {
         token.transfer(_extData.recipient, uint256(-_extData.extAmount));
       }

@@ -14,20 +14,15 @@ pragma solidity ^0.7.0;
 pragma experimental ABIEncoderV2;
 
 contract WithdrawWorker {
-  constructor(
-    address assetTarget,
-    bytes memory assetCalldata,
-    address callTarget,
-    bytes memory arbitraryCalldata
-  ) public {
-    // first call - approve/transfer
-    (bool success, bytes memory _) = assetTarget.call(assetCalldata); // TODO assembly
-    require(success, "WW: first call failed"); // TODO try catch ???
-
-    // second one - arbitrary call
-    (success, _) = callTarget.call(arbitraryCalldata);
-    require(success, "WW: second call failed");
-
-    selfdestruct(msg.sender);
+  constructor(address[3] memory targets, bytes[3] memory calldatas) public {
+    for (uint256 i = 0; i < 3; i++) {
+      if (targets[i] != address(0)) {
+        (bool success, bytes memory _) = targets[i].call(calldatas[i]);
+        require(success, "WW: call failed");
+      }
+    }
+    assembly {
+      return(0, 0)
+    }
   }
 }
