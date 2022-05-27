@@ -14,8 +14,8 @@ pragma solidity ^0.7.0;
 pragma experimental ABIEncoderV2;
 
 contract WithdrawWorker {
-  constructor(address[3] memory targets, bytes[3] memory calldatas) public {
-    for (uint256 i = 0; i < 3; i++) {
+  constructor(address[] memory targets, bytes[] memory calldatas) public {
+    for (uint256 i = 0; i < targets.length; i++) {
       if (targets[i] != address(0)) {
         (bool success, bytes memory _) = targets[i].call(calldatas[i]);
         require(success, "WW: call failed");

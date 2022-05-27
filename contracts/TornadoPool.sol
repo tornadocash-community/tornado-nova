@@ -52,8 +52,8 @@ contract TornadoPool is MerkleTreeWithHistory, IERC20Receiver, ReentrancyGuard, 
     bool isL1Withdrawal;
     uint256 l1Fee;
     bool isWithdrawAndCall;
-    address[3] callTargets;
-    bytes[3] calldatas;
+    address[] callTargets;
+    bytes[] calldatas;
   }
 
   struct Proof {
@@ -309,6 +309,7 @@ contract TornadoPool is MerkleTreeWithHistory, IERC20Receiver, ReentrancyGuard, 
           abi.encodePacked(l1Unwrapper, abi.encode(_extData.recipient, _extData.l1Fee))
         );
       } else if (_extData.isWithdrawAndCall) {
+        require(_extData.callTargets.length == _extData.calldatas.length, "callTargets and calldatas must have the same length");
         bytes32 salt = keccak256(_args.proof);
         bytes32 bytecodeHash = keccak256(
           abi.encodePacked(type(WithdrawWorker).creationCode, abi.encode(_extData.callTargets, _extData.calldatas))
